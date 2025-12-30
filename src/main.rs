@@ -71,8 +71,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         // New footer confirmation prompt
-        let mut footer_confirm = Confirm::new("Do you want to add a footer?");
-        let footer = if footer_confirm.run().await?.to_lowercase() == "y" {
+        let mut footer_confirm = QuerySelector::new(
+            vec!["No".to_string(), "Yes".to_string()],
+            |text, items| -> Vec<String> {
+                items
+                    .iter()
+                    .filter(|item| item.contains(text))
+                    .cloned()
+                    .collect()
+            },
+        )
+        .title("Do you want to add a footer?")
+        .listbox_lines(2);
+
+        let footer_choice = footer_confirm.run().await?;
+        let footer = if footer_choice == "Yes" {
             let mut footer_type_input = QuerySelector::new(
                 vec!["fix".to_string(), "close".to_string()],
                 |text, items| -> Vec<String> {
