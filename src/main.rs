@@ -2,7 +2,7 @@ use git_commitizen::{
     build_commit_message, build_commit_types, format_commit_types, perform_commit,
 };
 use promkit::preset::query_selector::QuerySelector;
-use promkit::{Prompt, preset::confirm::Confirm, preset::readline::Readline, suggest::Suggest};
+use promkit::{Prompt, preset::readline::Readline, suggest::Suggest};
 use std::env;
 use std::path::Path;
 use std::process::Command;
@@ -116,9 +116,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let full_commit_message =
             build_commit_message(commit_type, &scope, &description, &body, &footer);
 
-        let mut confirm_input = Confirm::new("Do you want to proceed with this commit?");
+        let mut confirm_input = QuerySelector::new(
+            vec!["Yes".to_string(), "No".to_string()],
+            |text, items| -> Vec<String> {
+                items
+                    .iter()
+                    .filter(|item| item.contains(text))
+                    .cloned()
+                    .collect()
+            },
+        )
+        .title("Do you want to proceed with this commit?")
+        .listbox_lines(2);
+
         let confirm = confirm_input.run().await?;
-        if confirm.to_lowercase() == "y" {
+        if confirm == "Yes" {
             perform_commit(Path::new("."), &full_commit_message)?;
             println!("Commit successful!");
         } else {
