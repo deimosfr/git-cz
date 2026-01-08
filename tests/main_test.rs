@@ -266,6 +266,49 @@ fn test_full_workflow() {
 }
 
 #[test]
+fn test_perform_commit_from_subdirectory() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let repo = Repository::init(temp_dir.path()).unwrap();
+
+    // Create initial commit
+    let mut index = repo.index().unwrap();
+    let _oid = repo.refname_to_id("HEAD").unwrap_or_else(|_| {
+        let tree = repo.treebuilder(None).unwrap().write().unwrap();
+        repo.commit(
+            Some("HEAD"),
+            &repo.signature().unwrap(),
+            &repo.signature().unwrap(),
+            "Initial commit",
+            &repo.find_tree(tree).unwrap(),
+            &[],
+        )
+        .unwrap()
+    });
+
+    // Create a subdirectory
+    let subdir = temp_dir.path().join("subdir");
+    std::fs::create_dir(&subdir).unwrap();
+
+    // Create and stage a file inside the subdirectory
+    let file_path = subdir.join("test.txt");
+    std::fs::write(&file_path, "Subdir content").unwrap();
+
+    // git2 index operations act relative to repo root usually, need to specify relative path
+    index.add_path(Path::new("subdir/test.txt")).unwrap();
+    index.write().unwrap();
+
+    let full_commit_message = "feat: Commit from subdir";
+
+    // Attempt to commit using the subdirectory as the path
+    // This simulates running `git-cz` from inside `subdir` where `.` refers to `subdir`
+    perform_commit(&subdir, &full_commit_message).unwrap();
+
+    let head = repo.head().unwrap();
+    let commit = repo.find_commit(head.target().unwrap()).unwrap();
+    assert_eq!(commit.message().unwrap(), full_commit_message);
+}
+
+#[test]
 #[should_panic(expected = "No such file or directory")]
 fn test_perform_commit_invalid_path() {
     let invalid_path = Path::new("/this/path/does/not/exist");
