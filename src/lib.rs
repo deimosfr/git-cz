@@ -1,6 +1,7 @@
-use git2::{Repository, Signature};
+use git2::Repository;
 use std::error::Error;
 use std::path::Path;
+use std::process::Command;
 
 pub fn build_commit_types() -> Vec<(&'static str, &'static str)> {
     vec![
@@ -83,37 +84,14 @@ pub fn perform_commit(repo_path: &Path, full_commit_message: &str) -> Result<(),
         return Err("Nothing to commit, working directory clean".into());
     }
 
-    let mut index = repo.index()?;
-    let tree_id = index.write_tree()?;
-    let tree = repo.find_tree(tree_id)?;
+    let status = Command::new("git")
+        .args(["commit", "-m", full_commit_message])
+        .current_dir(repo_path)
+        .status()?;
 
-    let config = repo.config()?;
-    let author_name = config.get_string("user.name")?;
-    let author_email = config.get_string("user.email")?;
-    let sig = Signature::now(&author_name, &author_email)?;
-
-    // Get the parent commit if it exists (not an initial commit)
-    let parent_commit = match repo.head() {
-        Ok(head) => {
-            let target = head.target().ok_or("Failed to find HEAD target")?;
-            Some(repo.find_commit(target)?)
-        }
-        Err(_) => None,
-    };
-
-    let parents = match &parent_commit {
-        Some(p) => vec![p],
-        None => vec![],
-    };
-
-    repo.commit(
-        Some("HEAD"),
-        &sig,
-        &sig,
-        full_commit_message,
-        &tree,
-        &parents,
-    )?;
+    if !status.success() {
+        return Err(format!("git commit failed with status {status}").into());
+    }
 
     Ok(())
 }

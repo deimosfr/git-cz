@@ -4,7 +4,7 @@ use git_commitizen::{
 use git2::Repository;
 use git2::Signature;
 use std::path::Path;
-use tempfile;
+use std::process::Command;
 
 #[test]
 fn test_build_commit_types() {
@@ -139,11 +139,14 @@ fn test_perform_commit() {
     index.add_path(Path::new("test.txt")).unwrap();
     index.write().unwrap();
 
-    perform_commit(temp_dir.path(), &full_commit_message).unwrap();
+    perform_commit(temp_dir.path(), full_commit_message).unwrap();
 
     let head = repo.head().unwrap();
     let commit = repo.find_commit(head.target().unwrap()).unwrap();
-    assert_eq!(commit.message().unwrap(), full_commit_message);
+    assert_eq!(
+        commit.message().unwrap(),
+        format!("{full_commit_message}\n")
+    );
 }
 
 #[test]
@@ -176,11 +179,14 @@ fn test_perform_commit_multiple_files() {
     index.write().unwrap();
 
     let full_commit_message = "feat: Add multiple files";
-    perform_commit(temp_dir.path(), &full_commit_message).unwrap();
+    perform_commit(temp_dir.path(), full_commit_message).unwrap();
 
     let head = repo.head().unwrap();
     let commit = repo.find_commit(head.target().unwrap()).unwrap();
-    assert_eq!(commit.message().unwrap(), full_commit_message);
+    assert_eq!(
+        commit.message().unwrap(),
+        format!("{full_commit_message}\n")
+    );
 
     // Verify both files are in the commit
     let tree = commit.tree().unwrap();
@@ -209,7 +215,7 @@ fn test_perform_commit_no_changes() {
     .unwrap();
 
     let full_commit_message = "feat: This commit should fail";
-    let result = perform_commit(temp_dir.path(), &full_commit_message);
+    let result = perform_commit(temp_dir.path(), full_commit_message);
 
     assert!(result.is_err(), "Commit with no changes should fail");
     assert_eq!(
@@ -258,7 +264,7 @@ fn test_full_workflow() {
     // Verify the commit
     let head = repo.head().unwrap();
     let commit = repo.find_commit(head.target().unwrap()).unwrap();
-    assert_eq!(commit.message().unwrap(), commit_message);
+    assert_eq!(commit.message().unwrap(), format!("{commit_message}\n"));
 
     // Verify the file is in the commit
     let tree = commit.tree().unwrap();
@@ -301,11 +307,55 @@ fn test_perform_commit_from_subdirectory() {
 
     // Attempt to commit using the subdirectory as the path
     // This simulates running `git-cz` from inside `subdir` where `.` refers to `subdir`
-    perform_commit(&subdir, &full_commit_message).unwrap();
+    perform_commit(&subdir, full_commit_message).unwrap();
 
     let head = repo.head().unwrap();
     let commit = repo.find_commit(head.target().unwrap()).unwrap();
-    assert_eq!(commit.message().unwrap(), full_commit_message);
+    assert_eq!(
+        commit.message().unwrap(),
+        format!("{full_commit_message}\n")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_perform_commit_respects_git_signing_configuration() -> Result<(), Box<dyn std::error::Error>>
+{
+    let temp_dir = tempfile::tempdir().unwrap();
+    let repo = Repository::init(temp_dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+    config.set_str("user.email", "test@example.com").unwrap();
+
+    let signing_key = temp_dir.path().join("signing-key");
+    let status = Command::new("ssh-keygen")
+        .args(["-q", "-t", "ed25519", "-N", "", "-f"])
+        .arg(&signing_key)
+        .status()?;
+    assert!(status.success(), "ssh-keygen should generate a signing key");
+
+    config.set_str("commit.gpgSign", "true").unwrap();
+    config.set_str("gpg.format", "ssh").unwrap();
+    config
+        .set_str("user.signingkey", signing_key.to_str().unwrap())
+        .unwrap();
+
+    std::fs::write(temp_dir.path().join("signed.txt"), "Signed content").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("signed.txt")).unwrap();
+    index.write().unwrap();
+
+    perform_commit(temp_dir.path(), "feat: Signed commit").unwrap();
+
+    let head = repo.head().unwrap();
+    let commit = repo.find_commit(head.target().unwrap()).unwrap();
+    assert!(
+        std::str::from_utf8(commit.raw_header_bytes())
+            .unwrap()
+            .contains("gpgsig -----BEGIN SSH SIGNATURE-----"),
+        "commit should contain the configured SSH signature"
+    );
+    Ok(())
 }
 
 #[test]
@@ -316,7 +366,7 @@ fn test_perform_commit_invalid_path() {
     perform_commit(invalid_path, commit_message).unwrap();
 }
 #[test]
-fn test_perform_initial_commit() {
+fn test_perform_initial_commit() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = tempfile::tempdir().unwrap();
     let repo = Repository::init(temp_dir.path()).unwrap();
     let mut index = repo.index().unwrap();
@@ -327,10 +377,14 @@ fn test_perform_initial_commit() {
     index.add_path(Path::new("first.txt")).unwrap();
     index.write().unwrap();
 
-    perform_commit(temp_dir.path(), &full_commit_message).expect("Initial commit should succeed");
+    perform_commit(temp_dir.path(), full_commit_message)?;
 
-    let head = repo.head().expect("HEAD should exist after initial commit");
+    let head = repo.head()?;
     let commit = repo.find_commit(head.target().unwrap()).unwrap();
-    assert_eq!(commit.message().unwrap(), full_commit_message);
+    assert_eq!(
+        commit.message().unwrap(),
+        format!("{full_commit_message}\n")
+    );
     assert_eq!(commit.parent_count(), 0);
+    Ok(())
 }
